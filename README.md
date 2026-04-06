@@ -30,6 +30,11 @@ error("bad")
 @typed
 def add(a: int, b: int) -> int:
     return a + b
+
+@memo
+def fib(n):
+    if n < 2: return n
+    return fib(n-1) + fib(n-2)
 ```
 
 ### Explicit imports

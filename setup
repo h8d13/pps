@@ -87,6 +87,16 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
     def warn(*a):  _log("warn", *a)
     def error(*a): _log("error", *a)
 
+    # Built-in memoization
+    def memo(fn):
+        cache = {}
+        def wrapper(*args):
+            if args not in cache:
+                cache[args] = fn(*args)
+            return cache[args]
+        wrapper.__name__ = fn.__name__
+        return wrapper
+
     # Built-in type checker
     def typed(fn):
         hints = getattr(fn, "__annotations__", {})
@@ -112,7 +122,7 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
 
     _globals = {"__builtins__": __builtins__, "__name__": "__main__"}
     # Always inject builtins
-    _globals.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "typed": typed})
+    _globals.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "memo": memo, "typed": typed})
     if "load_mod" in _src or "load_def" in _src or "load_run" in _src:
         _globals["load_mod"] = load_mod
         _globals["load_def"] = load_def
