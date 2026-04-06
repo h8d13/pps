@@ -19,27 +19,17 @@ BARE=1 ./setup latest test       # bare pypy, no pip, with strucs, no linting
 
 ### Built-ins
 
-> Logging and type checking without imports.
+> No imports needed.
 
 ```python
-# Logging (colored in tty)
-debug("verbose")      # cyan, hidden unless DEBUG=1
-info("normal")        # green
-warn("careful")       # yellow
-error("bad")          # red
-set_level("debug")    # show all levels
+debug("verbose")      # hidden unless DEBUG=1
+info("normal")        # colored: green/yellow/red
+warn("careful")
+error("bad")
 
-# Type enforcement
 @typed
 def add(a: int, b: int) -> int:
     return a + b
-
-add(1, "nope")  # TypeError: add() arg 'b' expected int, got str
-```
-
-```bash
-./run pps script              # normal
-DEBUG=1 ./run pps script      # verbose
 ```
 
 ### Explicit imports
