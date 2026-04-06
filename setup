@@ -65,7 +65,54 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         load_def = _loader.load_def
         load_run = _loader.load_run
 
+    # Built-in logging
+    import os
+    _log_levels = {"debug": 0, "info": 1, "warn": 2, "error": 3}
+    _log_level = 0 if os.environ.get("DEBUG") else 1
+    _log_colors = {"debug": "\033[36m", "info": "\033[32m", "warn": "\033[33m", "error": "\033[31m"}
+    _reset = "\033[0m"
+    def _log(level, *args):
+        if _log_levels.get(level, 1) >= _log_level:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            msg = " ".join(map(str, args))
+            out = sys.stderr if level in ("warn", "error") else sys.stdout
+            c, r = (_log_colors.get(level, ""), _reset) if out.isatty() else ("", "")
+            print(f"{c}[{ts}] {level.upper():5}{r} {msg}", file=out)
+    def set_level(level):
+        global _log_level
+        _log_level = _log_levels.get(level, 1)
+    def debug(*a): _log("debug", *a)
+    def info(*a):  _log("info", *a)
+    def warn(*a):  _log("warn", *a)
+    def error(*a): _log("error", *a)
+
+    # Built-in type checker
+    def typed(fn):
+        hints = getattr(fn, "__annotations__", {})
+        if not hints:
+            return fn
+        def wrapper(*args, **kwargs):
+            code = fn.__code__
+            names = code.co_varnames[:code.co_argcount]
+            for name, val in zip(names, args):
+                if name in hints and not isinstance(val, hints[name]):
+                    raise TypeError(f"{fn.__name__}() arg '{name}' expected {hints[name].__name__}, got {type(val).__name__}")
+            for name, val in kwargs.items():
+                if name in hints and not isinstance(val, hints[name]):
+                    raise TypeError(f"{fn.__name__}() arg '{name}' expected {hints[name].__name__}, got {type(val).__name__}")
+            result = fn(*args, **kwargs)
+            if "return" in hints and hints["return"] is not None:
+                if not isinstance(result, hints["return"]):
+                    raise TypeError(f"{fn.__name__}() return expected {hints['return'].__name__}, got {type(result).__name__}")
+            return result
+        wrapper.__name__ = fn.__name__
+        wrapper.__doc__ = fn.__doc__
+        return wrapper
+
     _globals = {"__builtins__": __builtins__, "__name__": "__main__"}
+    # Always inject builtins
+    _globals.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "typed": typed})
     if "load_mod" in _src or "load_def" in _src or "load_run" in _src:
         _globals["load_mod"] = load_mod
         _globals["load_def"] = load_def
@@ -272,22 +319,20 @@ EOF
 raise SystemExit(0)
 EOF
   else
-    cat > "$REQ_STRUCS/src/utils/greet" << 'EOF'
-def say(name):
-    print(f'Hello, {name}!')
-
-def inverse(name):
-    return name[::-1]
-EOF
     cat > "$REQ_STRUCS/src/main" << 'EOF'
-inverse, say = load_def("utils/greet", "inverse", "say")
+# info, warn, error, debug, set_level, typed are built-in
 
-say(inverse("World"))
+@typed
+def greet(name: str, times: int) -> str:
+    return (f"Hello {name}! " * times).strip()
 
-greet = load_mod("utils/greet")
-## we hit a cache here so not extra work
-## altho was already imported.
-greet.say(inverse("dlroW"))
+info("Starting up")
+info(greet("World", 3))
+
+try:
+    greet("World", "oops")  # will fail type check
+except TypeError as e:
+    error(f"Caught: {e}")
 EOF
   fi
 fi

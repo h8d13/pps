@@ -17,6 +17,31 @@ BARE=1 ./setup latest test       # bare pypy, no pip, with strucs, no linting
 
 ## Why pps
 
+### Built-ins
+
+> Logging and type checking without imports.
+
+```python
+# Logging (colored in tty)
+debug("verbose")      # cyan, hidden unless DEBUG=1
+info("normal")        # green
+warn("careful")       # yellow
+error("bad")          # red
+set_level("debug")    # show all levels
+
+# Type enforcement
+@typed
+def add(a: int, b: int) -> int:
+    return a + b
+
+add(1, "nope")  # TypeError: add() arg 'b' expected int, got str
+```
+
+```bash
+./run pps script              # normal
+DEBUG=1 ./run pps script      # verbose
+```
+
 ### Explicit imports
 
 > No forced `.py` ext, no packages/modules or relative imports, or `__init__.py` annoying files.
