@@ -48,7 +48,7 @@ if err: val = 0                                     # default on failure
 val, err = attempt(json.loads, s)
 if err: warn(err); val = {}                         # log + fall back
 
-# per-category dispatch in plain Python (no on= dict needed)
+# per-category dispatch
 val, err = attempt(load, p)
 if isinstance(err, OSError):   warn(err)
 elif isinstance(err, ValueError): error(err); raise err
