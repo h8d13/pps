@@ -152,7 +152,9 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         def _run(self, fn, a, kw):
             try: return fn(*a, **kw)
             except Exception as e:
-                self._log(e, getattr(fn, "__name__", repr(fn)))
+                name = getattr(fn, "__name__", "call")
+                if name == "<lambda>": name = "call"
+                self._log(e, name)
                 if not self.swallow: raise
                 self.ok, self.error = False, e
                 return self.value

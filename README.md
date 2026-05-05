@@ -55,10 +55,20 @@ val = attempt(int, "42")
 @attempt(default=None, log=error)
 def parse(s): return json.loads(s)
 
-# block: chains and multi-statement
-with attempt(log=warn, default={}) as a:
-    a.value = json.loads(open(p).read())
-data = a.value   # default if failed, else parsed
+# block: multi-statement with shared state
+with attempt(log=warn, default=0) as a:
+    out = open(p, "w")
+    out.write(header); out.write(body)
+    a.value = out.tell()
+
+# per-item resilience: attempt INSIDE the comprehension, not around it
+rows = [r for r in (attempt(json.loads, line, default=None, log=warn)
+                    for line in open(path)) if r]
+# (wrapping the whole comprehension in `with attempt` would lose ALL rows on one bad line)
+
+# chained one-liner: lambda is fine, label shows as 'call' in logs
+cfg = attempt(lambda: json.loads(open("cfg.json").read()),
+              log=warn, default={})
 ```
 
 `exc` is the namespace `attempt` walks for `on=`. Use directly when needed:
