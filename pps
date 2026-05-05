@@ -1,7 +1,11 @@
 import sys
 
 if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
-    _src = open(sys.argv[1]).read()
+    # Match `python3 script.py foo bar` semantics: script sees argv[0]=script,
+    # argv[1:]=user args. Drop pps's own argv[0].
+    sys.argv = sys.argv[1:]
+    _script = sys.argv[0]
+    _src = open(_script).read()
     # fast path if first arg is not an option - or --
     # we just exec the script as is using open and read
     # only init loader if script uses it
@@ -36,7 +40,7 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
                 if path not in self._cache:
                     self.load_mod(path)
 
-        _loader = Loader(sys.argv[1].rsplit("/", 1)[0] if "/" in sys.argv[1] else ".")
+        _loader = Loader(_script.rsplit("/", 1)[0] if "/" in _script else ".")
         load_mod = _loader.load_mod
         load_def = _loader.load_def
         load_run = _loader.load_run
@@ -126,7 +130,7 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
     # through dict.__getitem__ each lookup. Plus pre-compile so we don't re-parse.
     import types
     _mod = types.ModuleType("__main__")
-    _mod.__file__ = sys.argv[1]
+    _mod.__file__ = _script
     _g = _mod.__dict__
     _g["__builtins__"] = __builtins__
     _g.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "memo": memo, "exc": exc, "attempt": attempt})
@@ -135,7 +139,7 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         _g["load_def"] = load_def
         _g["load_run"] = load_run
     sys.modules["__main__"] = _mod
-    _code = compile(_src, sys.argv[1], "exec")
+    _code = compile(_src, _script, "exec")
 
     try:
         exec(_code, _g)

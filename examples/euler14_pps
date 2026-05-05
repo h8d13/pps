@@ -1,0 +1,26 @@
+# Project Euler #14, exercising pps builtins in the hot path:
+#   - attempt(chain_len, i) inside the 1M-iter loop (try/except + tuple unpack per call)
+#   - info / error for reporting
+# only runnable via:  ./run pps examples/euler14_pps
+import time
+
+def chain_len(n):
+    c = 1
+    while n != 1:
+        n = n // 2 if n % 2 == 0 else 3 * n + 1
+        c += 1
+    return c
+
+def main():
+    best_n, best_c = 0, 0
+    for i in range(1, 1_000_000):
+        c, err = attempt(chain_len, i)        # builtin in hot path
+        if err: error(err); continue
+        if c > best_c:
+            best_n, best_c = i, c
+    return best_n, best_c
+
+t0 = time.perf_counter()
+n, c = main()
+dt = time.perf_counter() - t0
+info(f"answer: n={n} chain={c}  time={dt:.3f}s")
