@@ -37,6 +37,35 @@ def fib(n):
     return fib(n-1) + fib(n-2)
 ```
 
+### Errors
+
+> One verb, four shapes. Levels plug in directly.
+
+```python
+# transparent: no kwargs, identical to int("42")
+val = attempt(int, "42")
+# silent default on failure
+val = attempt(int, s, default=0)
+# log+continue at any level (returns None on fail)
+data = attempt(json.loads, s, log=warn)
+# combined: log AND fall back
+data = attempt(json.loads, s, log=warn, default={})
+# per-category dispatch: walks exc(e), routes to the closest level
+data = attempt(load, p, on={OSError: warn, ValueError: error}, default=None)
+# decorator form for fn boundaries
+@attempt(default=None, log=error)
+def parse(s): return json.loads(s)
+```
+
+`exc` is the underlying namespace `attempt` walks for `on=` routing. Use directly when needed:
+
+```python
+exc.KeyError is KeyError       # tab-complete every builtin exception
+exc(err)                       # builtins-only ancestors
+exc.under(OSError)             # concrete subclasses, e.g. test fuzzing
+print(exc)                     # full tree
+```
+
 ### Explicit imports
 
 > No forced `.py` ext, no packages/modules or relative imports, or `__init__.py` annoying files.

@@ -97,6 +97,66 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         wrapper.__name__ = fn.__name__
         return wrapper
 
+    # Built-in exception namespace. exc.KeyError == KeyError.
+    # exc(e) -> ancestors, print(exc) -> tree, name in exc, exc[name], iter(exc).
+    import builtins as _bi
+    class _Exc:
+        def __init__(self):
+            self._all = {n: c for n in dir(_bi)
+                         if isinstance(c := getattr(_bi, n), type) and issubclass(c, BaseException)}
+            for n, c in self._all.items(): setattr(self, n, c)
+        def __call__(self, e):
+            cls = e if isinstance(e, type) else type(e)
+            return [c for c in cls.__mro__ if c.__name__ in self._all]
+        def under(self, cls):
+            out = []
+            def w(c):
+                for k in sorted(c.__subclasses__(), key=lambda x: x.__name__):
+                    if k.__name__ in self._all:
+                        out.append(k); w(k)
+            w(cls); return out
+        def __getitem__(self, name): return self._all[name]
+        def __contains__(self, name): return name in self._all
+        def __iter__(self): return iter(self._all.values())
+        def __len__(self): return len(self._all)
+        def __repr__(self):
+            lines = []
+            def w(c, d=0):
+                lines.append("  " * d + c.__name__)
+                kids = sorted((k for k in c.__subclasses__() if k.__name__ in self._all), key=lambda x: x.__name__)
+                for k in kids: w(k, d + 1)
+            w(BaseException); return "\n".join(lines)
+    exc = _Exc()
+
+    # Built-in error handler. Shape-polymorphic: call / decorator.
+    # attempt(fn, *a, **kw)                 -> fn(*a,**kw), re-raises (transparent)
+    # attempt(fn, *a, default=X)            -> swallow, return X
+    # attempt(fn, *a, log=warn|error|...)   -> log+return None on fail
+    # attempt(fn, *a, on={cls: level, ...}) -> per-category dispatch via exc(e)
+    # @attempt(default=..., log=..., on=...) on fn def
+    _UNSET = object()
+    def attempt(*args, default=_UNSET, log=None, on=None, **kwargs):
+        swallow = default is not _UNSET or log is not None or on is not None
+        def run(fn, a, kw):
+            try: return fn(*a, **kw)
+            except Exception as e:
+                handler = log
+                if on:
+                    for cls in exc(e):
+                        if cls in on: handler = on[cls]; break
+                if handler:
+                    handler(f"{getattr(fn, '__name__', repr(fn))}: {type(e).__name__}: {e}")
+                if not swallow: raise
+                return None if default is _UNSET else default
+        if args and callable(args[0]):
+            return run(args[0], args[1:], kwargs)
+        def deco(fn):
+            def wrapper(*a, **kw): return run(fn, a, kw)
+            wrapper.__name__ = getattr(fn, "__name__", "attempt_wrapped")
+            wrapper.__doc__ = fn.__doc__
+            return wrapper
+        return deco
+
     # Built-in type checker
     def typed(fn):
         hints = getattr(fn, "__annotations__", {})
@@ -122,7 +182,7 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
 
     _globals = {"__builtins__": __builtins__, "__name__": "__main__"}
     # Always inject builtins
-    _globals.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "memo": memo, "typed": typed})
+    _globals.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "memo": memo, "typed": typed, "exc": exc, "attempt": attempt})
     if "load_mod" in _src or "load_def" in _src or "load_run" in _src:
         _globals["load_mod"] = load_mod
         _globals["load_def"] = load_def
@@ -297,7 +357,7 @@ name = "$REQ_STRUCS"
 line-length = 120
 target-version = "py311"
 include = ["src/**/*"]
-builtins = ["load_mod", "load_def", "load_run"]
+builtins = ["load_mod", "load_def", "load_run", "exc", "attempt"]
 
 [tool.ruff.format]
 quote-style = "single"
