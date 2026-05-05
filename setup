@@ -128,34 +128,49 @@ if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
             w(BaseException); return "\n".join(lines)
     exc = _Exc()
 
-    # Built-in error handler. Shape-polymorphic: call / decorator.
+    # Built-in error handler. Shape-polymorphic: call / decorator / context-manager.
     # attempt(fn, *a, **kw)                 -> fn(*a,**kw), re-raises (transparent)
     # attempt(fn, *a, default=X)            -> swallow, return X
     # attempt(fn, *a, log=warn|error|...)   -> log+return None on fail
     # attempt(fn, *a, on={cls: level, ...}) -> per-category dispatch via exc(e)
     # @attempt(default=..., log=..., on=...) on fn def
+    # with attempt(default=..., log=..., on=...) as a:
+    #     a.value = chained.expr()           # multi-statement; a.ok / a.error / a.value
     _UNSET = object()
-    def attempt(*args, default=_UNSET, log=None, on=None, **kwargs):
-        swallow = default is not _UNSET or log is not None or on is not None
-        def run(fn, a, kw):
+    class _Attempt:
+        def __init__(self, default=_UNSET, log=None, on=None):
+            self.default, self.log, self.on = default, log, on
+            self.swallow = default is not _UNSET or log is not None or on is not None
+            self.value = None if default is _UNSET else default
+            self.error = None; self.ok = True
+        def _log(self, e, label):
+            handler = self.log
+            if self.on:
+                for cls in exc(e):
+                    if cls in self.on: handler = self.on[cls]; break
+            if handler: handler(f"{label}: {type(e).__name__}: {e}")
+        def _run(self, fn, a, kw):
             try: return fn(*a, **kw)
             except Exception as e:
-                handler = log
-                if on:
-                    for cls in exc(e):
-                        if cls in on: handler = on[cls]; break
-                if handler:
-                    handler(f"{getattr(fn, '__name__', repr(fn))}: {type(e).__name__}: {e}")
-                if not swallow: raise
-                return None if default is _UNSET else default
-        if args and callable(args[0]):
-            return run(args[0], args[1:], kwargs)
-        def deco(fn):
-            def wrapper(*a, **kw): return run(fn, a, kw)
+                self._log(e, getattr(fn, "__name__", repr(fn)))
+                if not self.swallow: raise
+                self.ok, self.error = False, e
+                return self.value
+        def __call__(self, fn):
+            def wrapper(*a, **kw): return self._run(fn, a, kw)
             wrapper.__name__ = getattr(fn, "__name__", "attempt_wrapped")
             wrapper.__doc__ = fn.__doc__
             return wrapper
-        return deco
+        def __enter__(self): return self
+        def __exit__(self, et, ev, tb):
+            if ev is None or not isinstance(ev, Exception): return False
+            self._log(ev, "block")
+            self.ok, self.error = False, ev
+            return self.swallow
+    def attempt(*args, default=_UNSET, log=None, on=None, **kwargs):
+        if args and callable(args[0]):
+            return _Attempt(default, log, on)._run(args[0], args[1:], kwargs)
+        return _Attempt(default, log, on)
 
     # Built-in type checker
     def typed(fn):

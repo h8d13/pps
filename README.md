@@ -39,30 +39,34 @@ def fib(n):
 
 ### Errors
 
-> One verb, four shapes. Levels plug in directly.
+> One verb, three shapes. Same kwargs everywhere.
 
 ```python
-# transparent: no kwargs, identical to int("42")
-val = attempt(int, "42")
-# silent default on failure
+# default on failure
 val = attempt(int, s, default=0)
-# log+continue at any level (returns None on fail)
-data = attempt(json.loads, s, log=warn)
-# combined: log AND fall back
+# log via any level, fall back
 data = attempt(json.loads, s, log=warn, default={})
-# per-category dispatch: walks exc(e), routes to the closest level
-data = attempt(load, p, on={OSError: warn, ValueError: error}, default=None)
-# decorator form for fn boundaries
+# per-category dispatch
+data = attempt(load, p, on={OSError: warn, ValueError: error})
+# transparent: no kwargs re-raises like fn(*args)
+val = attempt(int, "42")
+
+# decorator: fn that should never crash callers
 @attempt(default=None, log=error)
 def parse(s): return json.loads(s)
+
+# block: chains and multi-statement
+with attempt(log=warn, default={}) as a:
+    a.value = json.loads(open(p).read())
+data = a.value   # default if failed, else parsed
 ```
 
-`exc` is the underlying namespace `attempt` walks for `on=` routing. Use directly when needed:
+`exc` is the namespace `attempt` walks for `on=`. Use directly when needed:
 
 ```python
 exc.KeyError is KeyError       # tab-complete every builtin exception
 exc(err)                       # builtins-only ancestors
-exc.under(OSError)             # concrete subclasses, e.g. test fuzzing
+exc.under(OSError)             # concrete subclasses for test/fuzz
 print(exc)                     # full tree
 ```
 
