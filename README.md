@@ -39,43 +39,37 @@ def fib(n):
 
 ### Errors
 
-> One verb, three shapes. Same kwargs everywhere.
+> One shape. `(value, error)` tuple. Caller decides what to do.
 
 ```python
-# default on failure
-val = attempt(int, s, default=0)
-# log via any level, fall back
-data = attempt(json.loads, s, log=warn, default={})
-# per-category dispatch
-data = attempt(load, p, on={OSError: warn, ValueError: error})
-# transparent: no kwargs re-raises like fn(*args)
-val = attempt(int, "42")
+val, err = attempt(int, s)
+if err: val = 0                                     # default on failure
 
-# decorator: fn that should never crash callers
-@attempt(default=None, log=error)
-def parse(s): return json.loads(s)
+val, err = attempt(json.loads, s)
+if err: warn(err); val = {}                         # log + fall back
 
-# block: multi-statement with shared state
-with attempt(log=warn, default=0) as a:
-    out = open(p, "w")
-    out.write(header); out.write(body)
-    a.value = out.tell()
+# per-category dispatch in plain Python (no on= dict needed)
+val, err = attempt(load, p)
+if isinstance(err, OSError):   warn(err)
+elif isinstance(err, ValueError): error(err); raise err
+elif err: raise err
 
-# per-item resilience: attempt INSIDE the comprehension, not around it
-rows = [r for r in (attempt(json.loads, line, default=None, log=warn)
-                    for line in open(path)) if r]
-# (wrapping the whole comprehension in `with attempt` would lose ALL rows on one bad line)
+# success path is a clean tuple unpack
+val, err = attempt(int, "42")                       # (42, None)
 
-# chained one-liner: lambda is fine, label shows as 'call' in logs
-cfg = attempt(lambda: json.loads(open("cfg.json").read()),
-              log=warn, default={})
+# per-item resilience inside a comprehension
+rows = [v for v, e in (attempt(json.loads, line) for line in open(path))
+        if e is None]
+
+# kwargs pass through
+cfg, err = attempt(json.loads, open("cfg.json").read(), strict=False)
 ```
 
-`exc` is the namespace `attempt` walks for `on=`. Use directly when needed:
+`exc` is the builtin-exception namespace. Useful for category checks and introspection:
 
 ```python
 exc.KeyError is KeyError       # tab-complete every builtin exception
-exc(err)                       # builtins-only ancestors
+exc(err)                       # builtin ancestors of err's class
 exc.under(OSError)             # concrete subclasses for test/fuzz
 print(exc)                     # full tree
 ```
