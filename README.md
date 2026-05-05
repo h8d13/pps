@@ -35,30 +35,27 @@ def fib(n):
 
 ### Errors
 
-> One shape. `(value, error)` tuple. Caller decides what to do.
+> One shape. `(value, error)` tuple. Built for swallow-and-continue.
+> If you need to re-raise selectively, use plain `try/except`.
 
 ```python
+# default on failure
 val, err = attempt(int, s)
-if err: val = 0                                     # default on failure
+if err: val = 0
 
-val, err = attempt(json.loads, s)
-if err: warn(err); val = {}                         # log + fall back
-
-# per-category dispatch
-val, err = attempt(load, p)
-if isinstance(err, OSError):   warn(err)
-elif isinstance(err, ValueError): error(err); raise err
-elif err: raise err
+# log + fall back
+val, err = attempt(float, s)
+if err: warn(err); val = 0.0
 
 # success path is a clean tuple unpack
 val, err = attempt(int, "42")                       # (42, None)
 
 # per-item resilience inside a comprehension
-rows = [v for v, e in (attempt(json.loads, line) for line in open(path))
+nums = [v for v, e in (attempt(int, line) for line in open(path))
         if e is None]
 
 # kwargs pass through
-cfg, err = attempt(json.loads, open("cfg.json").read(), strict=False)
+val, err = attempt(int, "ff", base=16)              # (255, None)
 ```
 
 `exc` is the builtin-exception namespace. Useful for category checks and introspection:
