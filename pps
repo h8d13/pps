@@ -1,0 +1,286 @@
+import sys
+
+if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+    _src = open(sys.argv[1]).read()
+    # fast path if first arg is not an option - or --
+    # we just exec the script as is using open and read
+    # only init loader if script uses it
+    if "load_mod" in _src or "load_def" in _src or "load_run" in _src:
+        from importlib.util import spec_from_file_location, module_from_spec
+        from importlib.machinery import SourceFileLoader
+
+        class Loader:
+            def __init__(self, script_dir=""):
+                self.script_dir = script_dir
+                self._cache = {}
+
+            def load_mod(self, path):
+                if path in self._cache:
+                    return self._cache[path]
+                full = self.script_dir + "/" + path if self.script_dir else path
+                name = path.rsplit("/", 1)[-1]
+                loader = SourceFileLoader(name, full)
+                spec = spec_from_file_location(name, full, loader=loader)
+                mod = module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                self._cache[path] = mod
+                return mod
+
+            def load_def(self, path, *names):
+                mod = self._cache.get(path) or self.load_mod(path)
+                if len(names) == 1:
+                    return getattr(mod, names[0])
+                return tuple(getattr(mod, n) for n in names)
+
+            def load_run(self, path):
+                if path not in self._cache:
+                    self.load_mod(path)
+
+        _loader = Loader(sys.argv[1].rsplit("/", 1)[0] if "/" in sys.argv[1] else ".")
+        load_mod = _loader.load_mod
+        load_def = _loader.load_def
+        load_run = _loader.load_run
+
+    # Built-in logging
+    import os
+    _log_levels = {"debug": 0, "info": 1, "warn": 2, "error": 3}
+    _log_level = 0 if os.environ.get("DEBUG") else 1
+    _log_colors = {"debug": "\033[36m", "info": "\033[32m", "warn": "\033[33m", "error": "\033[31m"}
+    _reset = "\033[0m"
+    def _log(level, *args):
+        if _log_levels.get(level, 1) >= _log_level:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            msg = " ".join(map(str, args))
+            out = sys.stderr if level in ("warn", "error") else sys.stdout
+            c, r = (_log_colors.get(level, ""), _reset) if out.isatty() else ("", "")
+            print(f"{c}[{ts}] {level.upper():5}{r} {msg}", file=out)
+    def set_level(level):
+        global _log_level
+        _log_level = _log_levels.get(level, 1)
+    def debug(*a): _log("debug", *a)
+    def info(*a):  _log("info", *a)
+    def warn(*a):  _log("warn", *a)
+    def error(*a): _log("error", *a)
+
+    # Built-in memoization. Single-arg fast path (no tuple alloc).
+    # `in` check beats sentinel-via-get on pypy: JIT fuses the membership check
+    # with the subsequent lookup into one trace.
+    def memo(fn):
+        cache = {}
+        if getattr(fn, "__code__", None) and fn.__code__.co_argcount == 1:
+            def wrapper(arg):
+                if arg in cache: return cache[arg]
+                v = cache[arg] = fn(arg)
+                return v
+        else:
+            def wrapper(*args):
+                if args in cache: return cache[args]
+                v = cache[args] = fn(*args)
+                return v
+        wrapper.__name__ = fn.__name__
+        return wrapper
+
+    # Built-in exception namespace. exc.KeyError == KeyError.
+    # exc(e) -> ancestors, print(exc) -> tree, name in exc, exc[name], iter(exc).
+    import builtins as _bi
+    class _Exc:
+        def __init__(self):
+            self._all = {n: c for n in dir(_bi)
+                         if isinstance(c := getattr(_bi, n), type) and issubclass(c, BaseException)}
+            for n, c in self._all.items(): setattr(self, n, c)
+        def __call__(self, e):
+            cls = e if isinstance(e, type) else type(e)
+            return [c for c in cls.__mro__ if c.__name__ in self._all]
+        def under(self, cls):
+            out = []
+            def w(c):
+                for k in sorted(c.__subclasses__(), key=lambda x: x.__name__):
+                    if k.__name__ in self._all:
+                        out.append(k); w(k)
+            w(cls); return out
+        def __getitem__(self, name): return self._all[name]
+        def __contains__(self, name): return name in self._all
+        def __iter__(self): return iter(self._all.values())
+        def __len__(self): return len(self._all)
+        def __repr__(self):
+            lines = []
+            def w(c, d=0):
+                lines.append("  " * d + c.__name__)
+                kids = sorted((k for k in c.__subclasses__() if k.__name__ in self._all), key=lambda x: x.__name__)
+                for k in kids: w(k, d + 1)
+            w(BaseException); return "\n".join(lines)
+    exc = _Exc()
+
+    # Built-in error handler. Single shape: returns (value, error).
+    # val, err = attempt(fn, *a, **kw)
+    #   success -> (fn(*a,**kw), None)
+    #   failure -> (None, exception)
+    # Combine with exc(err) / isinstance(err, ...) for category dispatch.
+    def attempt(fn, *args, **kwargs):
+        try: return fn(*args, **kwargs), None
+        except Exception as e: return None, e
+
+    # Run as a real ModuleType, not exec on a plain dict. PyPy's JIT specializes
+    # global-access on module dicts (cell-level fast path); generic dicts go
+    # through dict.__getitem__ each lookup. Plus pre-compile so we don't re-parse.
+    import types
+    _mod = types.ModuleType("__main__")
+    _mod.__file__ = sys.argv[1]
+    _g = _mod.__dict__
+    _g["__builtins__"] = __builtins__
+    _g.update({"debug": debug, "info": info, "warn": warn, "error": error, "set_level": set_level, "memo": memo, "exc": exc, "attempt": attempt})
+    if "load_mod" in _src or "load_def" in _src or "load_run" in _src:
+        _g["load_mod"] = load_mod
+        _g["load_def"] = load_def
+        _g["load_run"] = load_run
+    sys.modules["__main__"] = _mod
+    _code = compile(_src, sys.argv[1], "exec")
+
+    try:
+        exec(_code, _g)
+    except SystemExit as e:
+        raise SystemExit(e.code)
+    else:
+        raise SystemExit(0)
+
+# only now import heavy stuff
+import subprocess, os, re, shutil, argparse
+PYPY_PATH, VERSION = sys.executable, sys.version
+
+parser = argparse.ArgumentParser(description="PY2STRAP")
+parser.add_argument("script", nargs="?", help="path to script to run")
+parser.add_argument("-p", "--path", action="store_true", help="show PyPy path")
+parser.add_argument("-v", "--version", action="store_true", help="show PyPy version")
+########################### ^^ argparse strips the '--' and so we can define args.version
+# no long form bellow
+parser.add_argument("-i", nargs="+", metavar="PKG", help="install pypy pip packages")
+parser.add_argument("-F", metavar="FILE", help="install from requirements file")
+parser.add_argument("-u", nargs="+", metavar="PKG", help="uninstall pypy pip packages")
+parser.add_argument("-l", nargs="?", const=".", metavar="PATH", help="lint with ruff")
+parser.add_argument("-f", nargs="?", const=".", metavar="PATH", help="format with ruff")
+parser.add_argument("-r", action="store_true", help="nuke current pypy installation")
+
+class GenError(RuntimeError):
+    """Generic error wrapper"""
+
+def confirm(action):
+    if input(f"{action}? [y/N] ").lower() != "y":
+        raise SystemExit(0)
+
+class P2PM:
+    def __init__(self, path, version_file="version"):
+        self.path = path
+        self.version_file = version_file
+        self.report_dir = os.path.join(open(version_file).read().strip(), ".p2strap")
+
+    def call(self, *args):
+        rc = subprocess.call([self.path] + list(args))
+        if rc != 0:
+            raise GenError(f"command failed with exit code {rc}")
+        return rc
+
+    def pip(self, *args):
+        return self.call("-m", "pip", *args)
+
+    def create_store(self):
+        os.makedirs(self.report_dir, exist_ok=True)
+
+    def report_path(self, pkg):
+        return os.path.join(self.report_dir, f"{pkg}.json")
+
+    def read_report_names(self, pkg):
+        path = self.report_path(pkg)
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return re.findall(r'"name":\s*"([^"]+)"', f.read())
+
+    def read_requirements(self, path):
+        return [s for l in open(path) if (s := l.split("#")[0].strip())]
+
+    def install(self, pkgs):
+        self.create_store()
+        for pkg in pkgs:
+            self.call("-m", "pip", "install", "--no-warn-script-location", "--report", self.report_path(pkg), pkg)
+
+    def uninstall(self, pkgs):
+        all_pkgs = []
+        for pkg in pkgs:
+            names = self.read_report_names(pkg)
+            if names:
+                all_pkgs.extend(names)
+                os.remove(self.report_path(pkg))
+            else:
+                all_pkgs.append(pkg)
+        if all_pkgs:
+            self.pip("uninstall", "-y", *all_pkgs)
+
+    def nuke(self):
+        pypy_dir = open(self.version_file).read().strip()
+        confirm(f"nuke {pypy_dir}")
+        shutil.rmtree(pypy_dir)
+        os.remove(self.version_file)
+
+class Linter:
+    def __init__(self, pypy_path):
+        self.pypy_path = pypy_path
+
+    def find_config(self, path):
+        path = os.path.abspath(path)
+        d = os.path.dirname(path) if os.path.isfile(path) else path
+        while d != "/":
+            if os.path.exists(os.path.join(d, "pyproject.toml")):
+                return d
+            d = os.path.dirname(d)
+        return os.path.dirname(path) if os.path.isfile(path) else path
+
+    def run(self, cmd, target, extra=None):
+        target = os.path.abspath(target)
+        if not os.path.exists(target):
+            raise GenError(f"path not found: {target}")
+        cwd = self.find_config(target)
+        args = [self.pypy_path, "-m", "ruff", cmd, os.path.relpath(target, cwd)]
+        if extra:
+            args += extra
+        return subprocess.call(args, cwd=cwd)
+
+def parser_error(msg):
+    raise GenError(msg)
+parser.error = parser_error
+
+def main():
+    try:
+        args = parser.parse_args()
+        if args.path:
+            print(PYPY_PATH)
+            raise SystemExit(0)
+        if args.version:
+            print(VERSION)
+            raise SystemExit(0)
+        if args.l is not None:
+            raise SystemExit(Linter(PYPY_PATH).run("check", args.l))
+        if args.f is not None:
+            linter = Linter(PYPY_PATH)
+            linter.run("format", args.f)
+            raise SystemExit(linter.run("check", args.f, ["--fix"]))
+        pypy_pm = P2PM(PYPY_PATH)
+        if args.r:
+            pypy_pm.nuke()
+        elif args.F:
+            pypy_pm.install(pypy_pm.read_requirements(args.F))
+        elif args.i:
+            pypy_pm.install(args.i)
+        elif args.u:
+            pypy_pm.uninstall(args.u)
+        else:
+            raise GenError("no script or action specified")
+    except GenError as e:
+        print(f"error: {e}\n")
+        parser.print_help()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130)

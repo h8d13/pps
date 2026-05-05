@@ -27,10 +27,6 @@ info("normal")        # colored: green/yellow/red
 warn("careful")
 error("bad")
 
-@typed
-def add(a: int, b: int) -> int:
-    return a + b
-
 @memo
 def fib(n):
     if n < 2: return n
